@@ -1,0 +1,838 @@
+---
+title: "Trabajo_aprendizaje_supervisado"
+author: "Ignacio Scuderi"
+date: "2/1/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, warning = FALSE))
+library(tidyverse)
+library(kableExtra)
+library(dplyr)
+library(treemapify)
+require(ISLR)
+require(MASS)
+library(caret)
+library(polycor)
+library (e1071)
+library(class)
+library(tree)
+require(randomForest)
+library(ISLR2)
+require(gbm)
+require(MASS)
+```
+
+# 1.Introducción
+
+El presente trabajo busca analizar los datos relativos al dataset *CreditCard*, realizando en primer lugar un análisis cualitativo, y luego uno cuantitativo de los datos. El mismo se encuentra estructurado de la siguiente forma: luego de la presente introducción, continua la segunda parte correspondiente al importado y la limpieza de los datos. En la tercera parte, se indagan los datos. En la cuarta sección se realiza el análisis cualitativo, mientras que en la quinta se hace lo propio con el cualitativo. Por último, se enumeran algunas conclusiones. 
+
+El dataset *CreditCard* contiene datos transversales sobre el historial de crédito de una muestra de solicitantes de un tipo específico de tarjeta de crédito.
+El dataset posee 1.319 observaciones y 12 variables que se enumeran a continuación:
+
+  Card: Factor. ¿Se aceptó la solicitud de la tarjeta de crédito? (character)
+  
+  Reports: Número de informes derogatorios de importancia. (integer)
+  
+  Age: Edad en años más doceavos de año. (numeric)
+  
+  Income: Ingresos anuales (en 10.000 dólares). (numeric)
+  
+  Share: Relación entre los gastos mensuales de la tarjeta de crédito y los ingresos anuales. (numeric)
+  
+  Expenditure: Gasto medio mensual de la tarjeta de crédito. (numeric)
+  
+  Owner: Factor. ¿El individuo es propietario de su vivienda? (character)
+  
+  Selfemp: Factor. ¿El individuo trabaja por cuenta propia? (character)
+  
+  Dependents: Número de personas a cargo. (integer)
+  
+  Months: Meses que vive en el domicilio actual. (integer)
+  
+  Majorcards: Número de tarjetas de crédito principales. (integer)
+  
+  Active: Número de cuentas de crédito activas. (integer)
+  
+Los datos fueron extraídos de *Greene, W.H. (2003).* Análisis econométrico, quinta edición. Link de los datos: *https://vincentarelbundock.github.io/Rdatasets/doc/AER/CreditCard.html*
+  
+
+# 2.Importado y limpieza de los datos
+
+En primer lugar se carga el archivo y se procede a realizar una visualización de los datos:
+
+```{r}
+df= read.csv("CreditCard.csv")
+```
+
+
+Se procede a eliminar la columna "X" que contiene un índice de las observaciones:
+
+```{r}
+df$X= NULL
+```
+
+Se corrobora que el dataframe no posee valores *NA*:
+```{r}
+colSums(is.na(df))
+```
+Debido a la ausencia de *NA*, no es necesario eliminar observaciones o realizar imputaciones a dichos valores.
+
+Cambio del formato de las variables *card*, *owner*, y *selfemp* de character a logical de modo de operar con las mismas: 
+
+```{r}
+str(df)
+df$card= ifelse(df$card=="yes", 1, 0)
+df$owner= ifelse(df$owner=="yes", 1, 0)
+df$selfemp= ifelse(df$selfemp=="yes", 1, 0)
+```
+
+
+Se analizan los principales estadísticos del dataframe:
+
+```{r}
+summary(df)
+```
+Se observa la existencia de valores muy reducidos para la variable *age*, por lo que se procede a estudiar dichos casos:
+
+```{r}
+df %>% filter(age<18)
+```
+
+Al ser de 18 años la edad mínima para obtener una tarjeta de crédito y considerando que sólo hay 7 observaciones que registran una edad inferior, se procede a excluir dichas filas del dataset. De igual modo, se procede a redondear la edad a enteros.
+
+```{r}
+df2= df %>% filter(age>=18)
+df2$age= round((df2$age),0)
+```
+
+Se multiplica la columna income por 10.000 para obtener el valor real de ingreso:
+
+```{r}
+df2$income=df2$income*10000
+```
+
+Se añade un campo adicional, *years*, de manera de visualizar los datos de la variable *months* con dicho corte temporal:
+
+```{r}
+df2$years= round(((df2$months)/12),0)
+```
+
+Se procede a indagar los valores únicos de cada variable, así como la cantidad:
+
+```{r}
+#df2 %>% lapply(unique)
+```
+
+Un primer barrido de los datos pareciera indicar que están correctamente cargados.
+
+\newpage
+# 3.Análisis exploratorio
+
+Se procede a analizar cada una de las variables:
+
+Gráfico de histograma de *card*:
+```{r, echo=FALSE,fig.align = 'center'}
+d<-ggplot(data=df2, aes(x=card))+ 
+  geom_bar(fill = "steelblue",width=0.9)+
+  labs(title="Personas a las que se les otorgó la tarjeta de crédito", x="Tarjeta otorgada", y="Cantidad de personas")+
+  scale_x_continuous(breaks = c(0,1), labels=c("No","Sí"))+
+  geom_text(
+    aes(label = sprintf('%s (%.1f%%)', after_stat(count), after_stat(count / sum(count) * 100))),
+    stat='count', vjust = 2, colour="white"
+  )
+d
+  
+  
+```
+*card* (variable dependiente): Se releva que 295 solicitudes de tarjeta de crédito (22,5%) han sido denegadas, mientras que 1017 fueron aceptadas (77,5%), por lo que hay una cantidad aceptable para ambas categorias, lo que facilitará el armado de modelos.
+
+\newpage
+Gráfico de mosaico de *reports*:
+
+```{r, echo=FALSE}
+reports2=df2 %>% group_by(reports)%>%
+  summarise(cant=n(),
+            porcentaje=(n()/length(df2$reports))*100)
+
+reports2$porcentaje= round(reports2$porcentaje,2)
+
+ggplot(data=reports2, aes(area = cant, fill=reports, label=porcentaje)) +
+  geom_treemap()+
+  geom_treemap_text(color="white")+
+  labs(title="Porcentaje de cada reporte sobre el total")
+  
+```
+
+*reports*: Se ve a raíz del gráfico anterior que el 80,34% de las personas no poseen informes derogatorios de importancia, mientras que el 10,37% tienen uno, y el 3,81% poseen dos.
+
+
+\newpage
+Gráfico de la variable *edad*:
+
+```{r, echo=FALSE}
+dd<-ggplot(data=df2, aes(x=age))+ 
+  geom_bar(aes(y = (..count..)/sum(..count..)),fill="steelblue")+
+  scale_x_continuous(breaks = seq(18,86,3))+
+  scale_y_continuous(breaks = seq(0.00,0.07,0.01))+
+  labs(title="Distribución de edades", x="Edad", y="Frecuencia")
+dd      
+```
+
+
+```{r, echo=FALSE}
+freq_acum=cumsum(prop.table(table(df2$age)))*100
+freq=prop.table(table(df2$age))*100
+summary(df2$age)
+
+```
+
+*edad*: Analizando la tabla de frecuencias y el gráfico, se observa que la moda es de 25 años, mientras que la media es de 33 años.
+Se observa asimismo una concentración en edades correspondientes a jóvenes. En este sentido, se pone de manifiesto que más del 50% de los registros son de personas de 31 años o menos. Se ve también que menos del 10% de los valores se corresponden con personas de 47 años o más.
+
+\newpage
+Gráfico de *income*:
+
+```{r, echo=FALSE}
+ggplot(df2,aes(x=income))+
+  geom_boxplot(width=0.08)+
+  coord_flip(ylim=c(-0.1,0.1))+
+  scale_x_continuous(breaks=c(2100,22371,29000,33673,40000,135000),labels = scales::comma)+
+  labs(title="Distribución de ingresos")+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+```{r, echo=FALSE}
+summary(df2$income)
+```
+
+
+*income*: El valor mínimo de ingresos es 2.100, mientras que el máximo se ubica en 135.000. Se nota la presencia de varios outliers que se corresponden a sujetos de ingresos altos.
+La media de ingresos es de 33.673, mientras que el primer rango intercuartílico se ubica en 22.371, la mediana en 29.000, y el tercer rango intercuartílico en 40.000.
+
+\newpage
+Gráfico de *share*:
+
+```{r, echo=FALSE}
+ggplot(df2,aes(x=share))+
+  geom_boxplot(width=0.08)+
+  coord_flip(ylim=c(-0.1,0.1))+
+  scale_x_continuous(breaks=c(0.0022080,0.0387754,0.0686361,0.0935162,0.9063205),labels = scales::comma)+
+  labs(title="Ratio gastos mensuales e ingresos anuales")+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+```{r, echo=FALSE}
+summary(df2$share)
+```
+
+*share*: Se observa un diagrama de caja con una relación entre los gastos mensuales de la tarjeta de crédito y los ingresos anuales compacta. La mediana es de 0.038, mientras que la media es de 0.068, empujada esta última hacia arriba debido a algunos valores atípicos con ratios superiores. En este sentido, el valor máximo obtiene un ratio de 0.90.
+
+\newpage
+Gráfico de *expenditure*:
+
+```{r, echo=FALSE}
+ggplot(df2,aes(x=expenditure))+
+  geom_boxplot(width=0.1)+
+  coord_flip(ylim=c(-0.2,0.2))+
+  scale_x_continuous(breaks=c(4.583,101.232,248.971,3099.505),labels = scales::comma)+
+    labs(title="Distribución de gastos")+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())
+```
+
+```{r, echo=FALSE}
+summary(df2$expenditure)
+```
+
+*expenditure*: el gasto medio mensual mínimo es 0, mientras que el máximo es de 3099,5. El primer rango intercuartílico es 4.5, la media es 101,23, el tercer rango es de 248,97. Por último la media se ubica en 184.97. Se observa un gasto medio mensual reducido y bastante homogeneo.
+
+\newpage
+Gráfico de *owner*:
+
+```{r, echo=FALSE}
+ggplot(data=df2, aes(x=owner))+ 
+  geom_bar(fill = "steelblue",width=0.9)+
+  labs(title="Personas según posesión de la vivienda", x="Propietario", y="Cantidad de personas")+
+  scale_x_continuous(breaks = c(0,1), labels=c("No","Sí"))+
+  geom_text(
+    aes(label = sprintf('%s (%.1f%%)', after_stat(count), after_stat(count / sum(count) * 100))),
+    stat='count', vjust = 2, colour="white")
+```
+
+
+*owner*: En cuanto a la propiedad de la vivienda, se observa que el 55,9% de las personas no son propietarias, mientras que el 44,1% lo es.
+
+\newpage
+Gráfico de *selfemp*:
+
+```{r, echo=FALSE}
+ggplot(data=df2, aes(x=selfemp))+ 
+  geom_bar(fill = "steelblue",width=0.9)+
+  labs(title="Personas que trabajan por cuenta propia", x="Cuenta propia", y="Cantidad de personas")+
+  scale_x_continuous(breaks = c(0,1), labels=c("No","Sí"))+
+  geom_text(
+    aes(label = sprintf('%s (%.1f%%)', after_stat(count), after_stat(count / sum(count) * 100))),
+    stat='count', vjust = 1.1, colour="white")
+```
+
+
+*selfemp*: En cuanto al cuentapropismo, se observa que la abrumadora mayoria de las personas no registran dicha condición (93.1%).
+
+\newpage
+Gráfico de *dependents*:
+
+```{r, echo=FALSE}
+
+dependents2=df2 %>% group_by(dependents)%>%
+  summarise(cant=n(),
+            porcentaje=(n()/length(df2$dependents))*100)
+
+dependents2$porcentaje= round(dependents2$porcentaje,2)
+
+ggplot(data=dependents2, aes(area = cant, fill=dependents, label=porcentaje)) +
+  geom_treemap()+
+   geom_treemap_text(color="white")+
+  labs(title="Cantidad de personas a cargo (porcentaje)")
+```
+
+```{r, echo=FALSE}
+summary(df2$dependents)
+```
+
+
+*dependents*: se releva que casi el 50% de las observaciones se corresponden a gente que no tiene personas a cargo, mientras que poco más del 20% posee una persona a cargo, 16,6% a dos, y 8,6% a tres.
+
+\newpage
+Gráfico de *years*:
+
+```{r, echo=FALSE}
+ggplot(data=df2, aes(x=years))+ 
+  geom_bar(aes(y = (..count..)/sum(..count..)),fill="steelblue")+
+  labs(title="Distribución de años desde que la persona vive en el domicilio actual", x="Años", y="Prop. de personas")+
+  scale_x_continuous(breaks = seq(0,45,2))+
+  scale_y_continuous(breaks = seq(0.00,0.22,0.02))
+```
+
+```{r, echo=FALSE}
+round(prop.table(table(df2$years)),2)
+round(cumsum(prop.table(table(df2$years))),2)
+```
+
+*years*: Se observa que la moda es de un año, mientras que la mediana se corresponde con personas que han habitado 2 años el mismo domicilio. Asimismo, casi el 80% de los valores se corresponden a personas que han vivido 7 años o menos en el mismo domicilio. Si bien se registran valores extremos, personas que han vivido más de 25 años o más en el mismo domicilio, estos representan menos del 1% de las observaciones.
+
+\newpage
+Gráfico de *majorcards*:
+
+```{r, echo=FALSE}
+ggplot(data=df2, aes(x=majorcards))+ 
+  geom_bar(fill = "steelblue",width=0.9)+
+  labs(title="Personas por número de tarjetas de crédito princiapales", x="Cantidad de tarjetas principales", y="Cantidad de personas")+
+  scale_x_continuous(breaks = c(0,1), labels=c("0","1"))+
+  geom_text(
+    aes(label = sprintf('%s (%.1f%%)', after_stat(count), after_stat(count / sum(count) * 100))),
+    stat='count', vjust = 1.1, colour="white")
+```
+
+
+*majorcards*: se observa que el 81,8% de las personas tienen una tarjeta principal, mientras que el 18,2% no poseen ninguna.
+
+\newpage
+Gráfico de *active*:
+
+```{r, echo=FALSE}
+ggplot(data=df2, aes(x=active))+ 
+  geom_bar(aes(y = (..count..)/sum(..count..)),fill="steelblue")+
+  scale_x_continuous(breaks = seq(0,46,2))+
+  labs(title="Distribución de número de cuentas de crédito activas", x="Cuentas de crédito", y="Prop. de personas")
+```
+
+```{r, echo=FALSE}
+round(prop.table(table(df2$active)),2)
+round(cumsum(prop.table(table(df2$active))),2)
+summary(df2$active)
+```
+
+
+*active*: Se observa que el 16,6% de las personas no poseen cuentas de crédito activas (moda), mientras que la mediana se ubica en 6 cuentas. Por último, la media es de 7 cuentas.
+
+\newpage
+# 4. Análisis cualitativo
+
+En primer lugar debemos analizar la correlación existente entre las variables, para asegurarnos que no hay multicolinealidad perfecta entre las mismas.
+
+```{r}
+hetcor(df2)[1]
+```
+
+En base a los resultados obtenidos en el cuadro anterior, vemos que hay multicolinealidad perfecta entre las variables *expenditure* y *share*, por lo que procedemos a eliminar la primera variable. Se ha tomado esta decisión, ya que que *share* nos provee de más información al relacionar ingresos y gastos. Podría ocurrir que alguien posea muchos gastos, pero que esto esté justificado por ingresos que también lo sean, y dicha relación no es recogida por *expenditure*.
+Asimismo y como era de esperar, hay multicolinealidad perfecta entre la variable *months* y el campo calculado *years*. Se decide eliminar el campo *months* por considerar más útil ver la información agrupada por años.
+
+```{r}
+df3= df2
+df2 = subset(df2, select = -c(expenditure, months))
+write.csv(df2,"df2.csv")
+df2= read.csv("df2.csv")
+df2$X= NULL
+
+```
+
+En primer lugar se deben crear dos subsets, uno de *training* y otro de *testing*, para entrenar y testear los modelos. Asimismo, se aplica una semilla al inicio, de manera de hacer los resultados replicables.
+
+Divido los datos de la siguiente manera:
+
+- 50% train
+- 50% test
+
+```{r}
+set.seed(2022)
+tamano_sample= floor(0.5*nrow(df2))
+training <- sample(seq_len(nrow(df2)), size = tamano_sample)
+df2.train= df2[training, ]
+df2.test=df2[-training, ]
+```
+
+Se ha decidido predecir si a la persona se le ha otorgado tarjeta de crédito o no.
+
+## 4.1 Evaluación de modelos
+
+Los modelos a utlizar en esta parte del trabajo son:
+
+  -Linear Discriminant Analysis (LDA)
+
+  -Logistic Regression
+
+  -Quadratic Discriminant Analysis (QDA)
+
+  -Naive Bayes
+
+  -Árboles
+
+  -Random Forest
+
+  -Boosting
+  
+A continuación se detalla una breve descripción de cada modelo.
+
+*Linear Discriminant Analysis (LDA)*: El Análisis Discriminante Lineal es un método de clasificación supervisado de variables cualitativas. Haciendo uso del teorema de Bayes, LDA estima la probabilidad de que una observación, dado un determinado valor de los predictores, pertenezca a cada una de las clases de la variable cualitativa, asignando la observación a la clase k para la que la probabilidad predicha es mayor.
+
+
+*Logistic Regression*: Este método permite estimar la probabilidad de una variable cualitativa binaria en función de una variable cuantitativa. La regresión logística permite calcular la probabilidad de que la variable dependiente pertenezca a cada una de las dos categorías en función del valor que adquiera la variable independiente.
+
+
+*Quadratic Discriminant Analysis (QDA)*: Esta metodología es similar a LDA, con la diferencia de que el QDA considera que cada clase k tiene su propia matriz de covarianza y, como consecuencia, la función discriminante toma forma cuadrática.
+
+
+*Naive Bayes*: El algoritmo Bayes naive es un algoritmo de clasificación de variables cualitativas basado en los teoremas de Bayes. Este algoritmo es llamado “ingenuo” porque calcula las probabilidades condicionales por separado, como si fueran independientes una de otra. Una vez que se obtienen las probabilidades condicionales por separado, se calcula la probabilidad conjunta de todas ellas, mediante un producto, para determinar la probabilidad de que pertenezca a la categoría. Luego se itera dicho proceso para cada observación.
+
+
+*Árboles*: Mediante este modelo se intenta predecir una variable dependiente a partir de variables independientes. Existen árboles de clasificación (variable discreta) y árboles de regresión (variable continua). Lo que hace este algoritmo es encontrar la variable independiente que mejor separa nuestros datos en grupos, que corresponden con las categorías de la variable objetivo. Esta mejor separación es expresada con una regla. A cada regla corresponde un nodo.
+
+Una vez hecho esto, los datos son separados (particionados) en grupos a partir de la regla obtenida. Después, para cada uno de los grupos resultantes, se repite el mismo proceso. Se busca la variable que mejor separa los datos en grupos, se obtiene una regla, y se separan los datos. Hacemos esto de manera recursiva hasta que nos es imposible obtener una mejor separación. Cuando esto ocurre, el algoritmo se detiene. Cuando un grupo no puede ser partido mejor, se le llama nodo terminal u hoja.
+
+*Random Forest*: Los Random forests promedian múltiples árboles de decisión, entrenados en diferentes partes del mismo set de entrenamiento, con el objetivo de reducir la varianza.
+Esto se produce a expensas de un pequeño aumento en el sesgo y cierta pérdida de interpretabilidad, pero en general aumenta considerablemente el rendimiento del modelo final.
+
+*Boosting*: El Boosting es una técnica de ensamble secuencial. En cada nuevo paso intentará aprender de los errores cometidos en los pasos previos. Trabaja sobre los errores del modelo
+anterior o bien usándolos para cambiar la ponderación en el siguiente modelo o bien entrenando un modelo que prediga los mismos.
+
+### Linear Discriminant Analysis (LDA)
+
+Se comienza entrenando el modelo LDA y luego prediciendo con los datos de testeo:
+```{r}
+set.seed(2022)
+lda.fit=lda(card~.,data=df2,subset=training)
+lda.pred=predict(lda.fit,newdata=df2.test)
+```
+Luego se observan y analizan los resultados que evaluan el modelo:
+
+```{r}
+df2.test$card= as.factor(df2.test$card)
+conf_matrix_lda <- confusionMatrix(lda.pred$class, df2.test$card, mode = "prec_recall", positive = "1")
+conf_matrix_lda
+```
+
+Una primera aproximación a la evaluación del modelo nos la da la métrica *Accuracy*:
+
+$$ \text {Accuracy = (Verdaderos positivos + Verdaderos negativos) / Total } $$
+En este caso se observa que dicha metrica obtiene un valor de 0.872, lo cual a priori es un buen indicador de nuestro modelo. Se pone de manifiesto al relevar el valor de la métrica *No Information Rate (NIR)* que el modelo realiza una predicción sustancialmente mejor que la que se podría obtener producto del azar (*NIR* calcula el porcentaje de casos mayoritarios dentro de la variable dependiente). 
+
+A continuación se evalua la métrica de *Recall (TPR)*:
+
+$$ \text {Recall = Verdaderos positivos / (Verdaderos positivos + Falsos negativos) } $$
+Es una forma de analizar la tasa de verdaderos positivos. Si su valor es bajo, quiere decir que hay muchos falsos negativos, es decir gente a la que se podría haberle dado tarjeta y se le negó. La tasa penaliza no detectar los casos positivos.
+En este caso, se observa que el *Recall* es de 0.996, por lo que se puede concluir que el modelo casi siempre detecta los casos positivos correctamente.
+
+Posteriormente se observa la métrica *Precision*:
+
+$$ \text {Precision = Verdaderos positivos / (Verdaderos positivos + Falsos positivos) } $$
+Esta métrica es de vital importancia en nuestro caso, se desea tener un *Precision* alto. Si se obtiene un valor reducido, querrá decir que hay muchos falsos positivos, es decir que le hemos dado una tajeta a gente a la que no deseabamos otorgarsela. Esto posee un impacto económico muy alto, por lo es imprescindible evitarlo. 
+Se observa que dicha métrica tiene un valor de 0.862. Es un valor elevado, similar a lo obtenido en *Accuracy*.
+
+Analizo finalmente la métrica de *Balanced accuracy*:
+
+$$ \text {Balanced accuracy = (TPR + TNR) / 2 } $$
+Esta métrica tiene en consideración el desbalance entre casos positivos y negativos en la variable dependiente. En el dataset seleccionado hay más casos con tarjeta que sin tarjeta, por lo que esta forma de calcular rectifica dicho problema.
+El *Balanced accuracy* es de 0.703, sensiblemente inferior al *Accuracy*.
+
+### Logistic regression 
+
+En primer término se procede a entrenar el modelo y a evaluar sus coeficientes:
+
+```{r}
+set.seed(2022)
+glm.fit=glm(card~.,data=df2.train,
+            family=binomial)  
+summary(glm.fit)
+```
+
+Haciendo el summary de *glm.fit* se observa que hay variables no significativas con un alfa al 5%. Se procede a realizar el modelado nuevamente sin incluirlas:
+
+```{r}
+glm.fit=glm(card~reports+age+income+share+selfemp+dependents+active,data=df2.train,
+            family=binomial)
+summary(glm.fit)
+```
+Se pone de manifiesto que en el nuevo modelo son todas variables relevantes al 5% de significatividad.
+
+Se procede a realizar la predicción con los datos de testeo:
+```{r}
+glm.probs = predict(glm.fit, newdata = df2.test, type = "response") 
+glm.pred = as.factor(ifelse(glm.probs>0.5,1,0))
+```
+
+Se evalúa la matriz de confusión del modelo:
+
+```{r}
+card.test = as.factor(df2.test$card)
+
+conf_matrix_glm <- confusionMatrix(glm.pred, card.test, mode = "prec_recall", positive = "1")
+conf_matrix_glm
+```
+
+Una primera aproximación a la evaluación del modelo nos la da la métrica *Accuracy*: Se observa un valor de 0.975 elevado, que lo es aún más cuando se observa el *Balanced accuracy*, de 0.976.
+Por otra parte, el *Recall*, clave en nuestro modelo, tiene un valor de 0.974, mientras que la *Precision* es de 0.9941.
+
+### Quadratic Discriminant Analysis
+
+Se comienza entrenando el modelo y luego prediciendo con los datos de testeo:
+
+```{r}
+set.seed(2022)
+qda.fit=qda(card~.,data=df2, subset=training)
+qda.pred=predict(qda.fit,newdata=df2.test)
+
+conf_matrix_qda <- confusionMatrix(qda.pred$class, df2.test$card, mode = "prec_recall", positive = "1")
+conf_matrix_qda
+```
+Se observa un valor elevado de *Accuracy* y *Balanced accuracy*, 0.9741 y 0.9730 respectivamente. De igual modo, el *Recall* y la *Precision*, con valores de 0.9749 y 0.9921, demuestran valores muy altos.
+
+### Naive Bayes
+
+Se entrena el modelo con los datos de *training*, luego se predice con los datos de *testing*, y por último se evalúa la matriz de confusión:
+
+```{r}
+set.seed(2022)
+nb.fit <- naiveBayes(card~. , data = df2 , subset = training )
+nb.pred <- predict (nb.fit , newdata=df2.test)
+
+
+conf_matrix_nb <- confusionMatrix(nb.pred, df2.test$card, mode = "prec_recall", positive = "1")
+conf_matrix_nb
+```
+
+Se observan buenas métricas para el presente modelo. El *Accuracy* es de 0.968, valor que se mantiene practicamente idéntico al observar el *Balanced accuracy*, de 0.969. La *Precision* es muy elevada, de 0.9921, siendo esta una métrica central del análisis. El *Recall* es muy elevado también, de 0.9671.
+
+
+### Árboles
+
+A continuación se procede a entrenar, predecir, y evaluar, el modelo de árboles de clasificación:
+
+```{r}
+set.seed(2022)
+tree.fit <- tree(card~., df2, subset = training)
+
+plot(tree.fit)
+text(tree.fit, pretty=0)
+
+summary(tree.fit)
+
+tree.probs = predict(tree.fit, df2.test)
+tree.pred = as.factor(ifelse(tree.probs>0.5,1,0))
+
+conf_matrix_tree = confusionMatrix(tree.pred, df2.test$card, mode = "prec_recall", positive = "1")
+conf_matrix_tree
+```
+Simplemente utilizando dos variables y con tres nodos terminales, se ha obtenido un *Accuracy* de 0.977, mientras que el *Balanced accuracy* es de 0.9854.
+El *Recall* alcanza el valor de 0.970, y la *Precision* es de 1, por lo que el modelo no le da tarjeta a nadie que no debería poseerla.
+Para el armado del árbol, se puede observar en el plot realizado que la primera variable utilizada fue *share*. Si para dicha variable (que mide ratio *expenditure* e *income*), el valor no se encontraba por debajo de 0.0012625, entonces con probabilidad 0.998 se le otorga tarjeta de crédito. En el caso de que el *share* fuera menor, el árbol decanta a una nueva evaluación con la variable *age*. Si la edad es menor a 48.5, entonces la probabilidad asignada a tener una tarjeta es de 0.033, caso contrario 0.33. Vemos en este sentido que ser joven sería una penalidad.
+
+### Random Forest
+
+Se procede a modelar un *Random forest* con 10.000 árboles y se calcula la cantidad de variables que minimizan el error (evaluando todas las variables posibles).
+
+```{r}
+set.seed(2022)
+df2$card=as.factor(df2$card)
+rf.fit <- randomForest(card~.,data=df2,subset=training)
+NVariables <- ncol(df2)-1
+test.err <- double(NVariables)
+
+set.seed(2022)
+for(mtry in 1:NVariables){
+  fit <- randomForest(card~.,data=df2,subset=training,mtry=mtry,ntree=10000)
+  pred <- predict(fit,df2.test)
+  test.err[mtry]<- with(df2.test,1-mean(df2$card==pred))
+  cat(mtry," ") 
+}
+
+plot(1:mtry,test.err,pch=19,col="red",type="b")
+
+set.seed(2022)
+conf_matrix_rf = confusionMatrix(pred, df2.test$card, mode = "prec_recall", positive = "1")
+conf_matrix_rf
+
+fit[9] 
+```
+
+De acuerdo a los resultados obtenidos, se pone de manifiesto que el error se minimiza al utilizar una sola variable. Se observa en la última línea del código que este valor se debe a que la variable *share* posee una relevancia mucho mayor en la determinación de si se le da tarjeta a la persona o no, seguido por la variable *age*, aunque muy por detras.
+
+En la *confusion matrix* se observa que el *Accuracy* del modelo es de 0.971, y que el *Balanced accuracy* es de 0.9711. El *Recall* es de 0.9710, mientras que la *Precision* es de 0.9921.
+
+### Bosting
+
+A continuación se hace el modelado con *Boosting*, utilizando CV. Luego se procede a ajustar los parámetros, indicando una profundidad de 1,2, y 4. Se especifican dos *shrinkage*, de 0.01 y 0.001. Asimismo, se realizan pruebas con árboles de tamaño 100 a 10.000, con saltos de a 100. Por último, se especifican dos tamaños mínimos de observaciones permitidas, 10 y 30. Esto nos da como resultado 1200 modelos a testear.
+
+```{r}
+set.seed(2022)
+df2.test$card=as.factor(df2.test$card)
+df2.train$card=as.factor(df2.train$card)
+#fitControl <- trainControl(method = 'cv', number = 10, summaryFunction=defaultSummary)
+
+set.seed(2022)
+#getModelInfo()$gbm$parameters
+#gbmGrid <-  expand.grid(interaction.depth = c(1,2,4),
+#                        n.trees = seq(from=100,to=10000,by=100),
+#                        shrinkage = c(0.001,0.01),
+#                        n.minobsinnode= c(10,30))
+
+#set.seed(2022)
+#fit.gbm <- train(card~., data = df2.train, method = 'gbm', trControl = fitControl, tuneGrid = gbmGrid, metric = c('Accuracy'), distribution = "bernoulli")
+
+#saveRDS(fit.gbm, "fit.gbm.csv")
+fit.gbm <- readRDS("fit.gbm.csv")
+
+fit.gbm$bestTune
+
+res_gbm <- fit.gbm$results
+acc_gbm <- subset(res_gbm[5])
+max(acc_gbm)
+
+set.seed(2022)
+boost.caret.pred <- predict(fit.gbm,df2.test)
+
+set.seed(2022)
+conf_matrix_gbm <- confusionMatrix(boost.caret.pred, df2.test$card, mode = "prec_recall",  positive = "1")
+conf_matrix_gbm
+summary(fit.gbm)
+```
+Se obtiene como resultado que 7200 árboles, con una profundidad de 2, un *shrinkage* de 0.01, y un tamaño mínimo de 30, es el modelo que mejor ajusta. El *share* es la variable más significativa, seguido por la variable *age*, aunque muy por detras.
+Al analizar la matriz de confusión, se observan buenos resultados para *Accuracy*, *Balanced Accuracy*, y *Recall*, con valores de 0.975, 0.976, y 0.975 respectivamente. Es especialmente importante destacar que la *Precision*, métrica fundamental en nuestro análisis, alcanzó el valor de 0.994, lo cual indica que se le dió tarjeta de crédito solo a tres personas que no debían tenerla.
+
+
+## 4.2 Conclusiones - Análisis cualitativo
+
+Para analizar de manera más sencilla los diversos modelos y sus resultados, se crea un dataframe que agrupe los resultados obtenidos:
+
+```{r}
+metricas= c("Accuracy","Recall","Precision","Balanced accuracy" )
+
+lda= c(conf_matrix_lda$overall[[1]], conf_matrix_lda$byClass[[6]],
+       conf_matrix_lda$byClass[[5]], conf_matrix_lda$byClass[[11]])
+
+glm= c(conf_matrix_glm$overall[[1]], conf_matrix_glm$byClass[[6]],
+       conf_matrix_glm$byClass[[5]], conf_matrix_glm$byClass[[11]])
+
+qda= c(conf_matrix_qda$overall[[1]], conf_matrix_qda$byClass[[6]],
+       conf_matrix_qda$byClass[[5]], conf_matrix_qda$byClass[[11]])
+
+nb= c(conf_matrix_nb$overall[[1]], conf_matrix_nb$byClass[[6]],
+       conf_matrix_nb$byClass[[5]], conf_matrix_nb$byClass[[11]])
+
+tree= c(conf_matrix_tree$overall[[1]], conf_matrix_tree$byClass[[6]],
+       conf_matrix_tree$byClass[[5]], conf_matrix_tree$byClass[[11]])
+
+rf= c(conf_matrix_rf$overall[[1]], conf_matrix_rf$byClass[[6]],
+       conf_matrix_rf$byClass[[5]], conf_matrix_rf$byClass[[11]])
+
+gbm= c(conf_matrix_gbm$overall[[1]], conf_matrix_gbm$byClass[[6]],
+       conf_matrix_gbm$byClass[[5]], conf_matrix_gbm$byClass[[11]])
+
+df.results= data.frame(metricas,lda,glm,qda,nb,tree,rf,gbm)
+rownames(df.results) = df.results$metricas
+df.results$metricas= NULL
+df.results
+```
+
+Al analizar los resultados, se ve que el modelo de *árbol* es el que posee un *Accuracy*, *Balanced accuracy*, y *Precision* más elevados. Se destaca especialmente el valor registrado para *Presicion*, ya que como fuera anteriormente mencionado, significa que no se le ha dado a nadie que no debía poseerla, una tarjeta de crédito. 
+Si bien el modelo de *lda* posee la *Recall* más elevada, esta métrica no es tan importante en el caso que analizado. Si la métrica es elevada, esto significa que hay pocos falsos negativos, por lo que se le ha dado tarjeta a casi todas las personas suceptibles de recibirla. Ahora bien, se releva que dicho modelo es el que peor se comporta en todas las otras métricas, incluida la *Precision*, con el elevado costo económico que esto conlleva.
+Si se estuviera analizando el caso de la detección de una enfermedad en cambio, esta métrica sería fundamental.
+
+Como comentario general, es importante destacar que la métrica más importante para la predicción es *share*. Se pone de manifiesto en diversas partes del análisis que el resto de las variables ocupan un lugar decididamente secundario.
+
+# 5. Análisis cuantitavo
+
+Para el análisis cuantitativo se opta por utilizar la variable *Expenditure* como dependiente para el modelado. Se procede a exlcuir la variable *share*, ya que la misma tiene incluida en su definición, el valor de la variable dependiente. De igual modo y replicando lo realizado para el análisis cualitativo, se elimina la variable *months* para evitar multicolinealidad:  
+
+```{r}
+df3 = subset(df3, select = -c(share,months))
+write.csv(df3,"df3.csv")
+df3= read.csv("df3.csv")
+df3$X= NULL
+```
+
+A continuación, se evalúa la correlación entre las variables seleccionadas:
+
+```{r}
+hetcor(df3)[1]
+```
+
+Se observa que no hay variables con multicolinealidad, por lo que se procede a realizar la división de los datos entre *train* y *test*, en partes iguales:
+
+```{r}
+set.seed(2022)
+tamano_sample= floor(0.5*nrow(df3))
+train <- sample(seq_len(nrow(df3)), size = tamano_sample)
+df3.train= df3[train, ]
+df3.test=df3[-train, ]
+```
+
+
+## 5.1 Evaluación de modelos
+
+Los modelos a utlizar en esta parte del trabajo son:
+
+  -Árboles
+
+  -Random Forest
+
+  -Boosting
+
+### Arboles
+
+```{r}
+set.seed(2022)
+tree.fit2 <- tree(expenditure~., df3, subset = train)
+
+plot(tree.fit2)
+text(tree.fit2, pretty = 0)
+
+summary(tree.fit2)
+tree.fit2
+
+tree.pred2 = predict(tree.fit2, df3.test)
+tree= postResample(tree.pred2,df3.test$expenditure)
+tree
+```
+Se observa que el árbol está compuesto de 4 variables y 8 nodos terminales. En primer lugar se evalúa el valor de la variable *card*. Si la persona no tiene tarjeta, naturalemente su gasto será de 0. En caso contrario pasa a evaluarse el ingreso. 
+Si la persona posee un ingreso menor a 46.900, se decanta a analizar si la cantidad de años en la vivienda es menor a 0.5. En caso negativo, los gastos estimados son de 196.2, caso contrario, evalúa el número de cuentas activas. Si posee menos de 2.5 cuentas, el gasto será de 410.6, mientras que si es mayor, será de 218.6.
+
+Si la persona posee un ingreso mayor a 46.900, se analiza mediante la variable *years* si hace más de 1.5 años habita la misma vivienda. En caso que sea así, el gasto será de 331.8, mientras que en el caso negativo se evalua nuevamente el ingreso. En este caso se analiza si el mismo es menor a 69.440. En caso negativo el gasto será de 789.9, mientas que en caso positivo, se evalua si la persona posee menos de 1.5 cuentas activas. En el caso de que la respuesta sea positiva, el gasto estipulado por el modelo es de 685.3, caso contrario es de 334.8.
+
+Al analizar los resultados obtenidos vemos que las variables no predicen bien la variable dependiente. Se ha obtenido un R cuadrado de solo 0.167. La raíz del error cuadrático medio es de 260,51.
+
+### Random forest
+
+Se procede a modelar un *Random forest* con 10.000 árboles y se calcula la cantidad de variables que minimizan el error (evaluando todas las variables posibles).
+
+```{r}
+set.seed(2022)
+NVariables <- ncol(df3)-1
+test.err <- double(NVariables)
+
+set.seed(2022)
+for(mtry in 1:NVariables){
+  fit <- randomForest(expenditure~.,data=df3,subset=train,mtry=mtry,ntree=10000)
+  pred <- predict(fit,df3.test)
+  test.err[mtry]<- with(df3.test,1-mean((df3$expenditure-pred)^2))
+  cat(mtry," ")
+}
+
+plot(1:mtry,test.err,pch=19,col="red",type="b")
+
+set.seed(2022)
+rf2=postResample(pred,df3.test$expenditure)
+rf2
+```
+Se observa en base al plot, que el error se minimiza con 10 variables.
+
+Se observan magros resultados predictivos. El *R-squared* alcanza un valor de 0.178. La raíz del error cuadrático medio es de 259,987. 
+
+### Boosting
+
+A continuación se hace el modelado con *Boosting*, utilizando CV. Luego se procede a ajustar los parámetros, indicando una profundidad de 1,2, y 4. Se especifican dos *shrinkage*, de 0.01 y 0.001. Asimismo, se realizan pruebas con árboles de tamaño 100 a 10.000, con saltos de a 100. Por último, se especifican dos tamaños mínimos de observaciones permitidas, 10 y 30. Esto nos da como resultado 1200 modelos a testear.
+
+```{r}
+set.seed(2022)
+#fitControl2 <- trainControl(method = 'cv', number = 10, summaryFunction=defaultSummary)
+
+#set.seed(2022)
+#getModelInfo()$gbm$parameters
+#gbmGrid <-  expand.grid(interaction.depth = c(1,2,4),
+#                        n.trees = seq(from=100,to=10000,by=100),
+#                        shrinkage = c(0.001,0.01),
+#                        n.minobsinnode= c(10,30))
+
+#set.seed(2022)
+#fit.gbm2 <- train(expenditure~., data = df3.train, method = 'gbm', trControl = fitControl2, tuneGrid = gbmGrid, distribution = "gaussian")
+
+#saveRDS(fit.gbm2, "fit.gbm2.csv")
+fit.gbm2 <- readRDS("fit.gbm2.csv")
+
+fit.gbm2$bestTune
+
+res_gbm2 <- fit.gbm2$results
+acc_gbm2 <- subset(res_gbm[5])
+max(acc_gbm2)
+
+set.seed(2022)
+boost.pred2 <- predict(fit.gbm2,df3.test)
+
+set.seed(2022)
+boosting=postResample(boost.pred2,df3.test$expenditure)
+summary(fit.gbm2)
+```
+El mejor modelo es con 2800 árboles, profundidad 2, *shrinkage* 0.001, y un mínimo de observaciones de 30. La variable más relevante a la hora de predecir los gastos es, como era de esperar, *card*, seguido de *income*. En tercer lugar aparece *years*, y en cuarto lugar *age*.
+
+Se observan nuevamente malos resultados. El *R-squared* alcanza el valor de 0.188. La raíz del error cuadrático medio es de 256,343.
+
+## 5.2 Conclusiones - Análisis cuantitativo
+
+Para analizar de manera más sencilla los diversos modelos y sus resultados, se crea un dataframe que agrupe los resultados obtenidos:
+
+```{r}
+metricas2= c("RMSE","Rsquared","MAE")
+
+tree= c(tree[[1]], tree[[2]],tree[[3]])
+  
+rf2= c(rf2[[1]], rf2[[2]],rf2[[3]])
+
+boosting= c(boosting[[1]], boosting[[2]],boosting[[3]])
+
+
+df.results2= data.frame(metricas2, tree, rf2, boosting)
+rownames(df.results2) = df.results2$metricas2
+df.results2$metricas2= NULL
+df.results2
+```
+
+Se observa que los tres modelos no logran presentar buenas métricas. A modo de ejemplo, el *R-squared* no supera en ningun caso el valor de 0.188. De los tres, el que obtiene un menor error y un R2 más elevado es el modelo de *boosting*, aunque con resultados decepcionantes.
+Es muy probable en este sentido, que la ausencia de más variables cuantitativas haya sido sustancial en el mal comportamiento de los modelos.
