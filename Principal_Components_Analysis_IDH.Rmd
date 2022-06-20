@@ -1,0 +1,163 @@
+---
+title: "IDH"
+author: "Ignacio Scuderi"
+date: "28/12/2021"
+output: pdf_document
+---
+
+```{r global_options, include=FALSE}
+knitr::opts_chunk$set(knitr::opts_chunk$set(echo = TRUE, comment = NA, message = FALSE, warning = FALSE))
+library(tidyverse)
+```
+
+# 1.Introducción
+
+El presente trabajo busca analizar los datos relativos al Índice de Desarrollo Humano (IDH), utilizando la metodología de componentes principales. El mismo se encuentra estructurado de la siguiente forma: luego de la presente introducción, continua la segunda parte correspondiente al importado y la limpieza de los datos. En la tercera parte, se indagan los datos mediante el uso de componentes principales. 
+
+El IDH es un índice compuesto calculado por la Organización de las Naciones Unidas (ONU), como medida multidimensional del nivel de desarrollo de los países. El mismo tiene en cuenta variables sanitarias, de expectativa de vida, distribución del ingreso, y producto bruto interno per cápita. 
+
+Se utilizará para el análisis el fichero *data_HDI_2019.csv*, que contiene los datos de IDH correspondientes a 189 países y 22 variables.
+
+# 2.Importado y limpieza de los datos
+
+
+En primer lugar se debe importar el fichero de trabajo:
+
+```{r}
+IDH= read.csv("data_HDI_2019.csv", dec = ",", header = TRUE, sep = ";")
+```
+
+Identificación y eliminación de las filas con valores *NA*
+
+```{r}
+IDH2=IDH %>% drop_na()
+```
+
+Reemplazo de la columna que indexa el listado de países por la columna *country*:
+```{r}
+rownames(IDH2) = IDH2$COUNTRY
+IDH2$COUNTRY= NULL
+head(IDH2)
+names(IDH2) 
+```
+
+Se observa en el paso anterior que la variable IDH esta incluida, por lo que antes de realizar el análisis de componentes principales, se debe excluir del dataframe. De igual modo, se procede a excluir IHDI ya que refleja el propio IDH ajustado por desigualdad.
+
+
+```{r}
+var_excluidas= c("HDI", "IHDI")
+IDH2 = select(IDH2, -var_excluidas)
+names(IDH2)
+```
+
+# 3. Componentes principales
+
+## 3.1 Realiza una anàlisis de componenetes principales de los datos anteriores.
+
+Se procede a realizar el análsis por componentes principales ajustando por centrado y escala.
+
+```{r}
+ACP= prcomp(IDH2, center=TRUE, scale=TRUE) 
+ACP.var=ACP$sdev^2
+pve=ACP.var/sum(ACP.var)
+
+plot(pve, xlab="Componentes", ylab="Prop. Var. Explicada", ylim=c(0,0.75),type='b')
+
+plot(cumsum(pve), xlab="Componentes", ylab="Prop. Var. Explicada Acumulada", ylim=c(0.6,1),type='b')
+
+summary(ACP)
+
+
+```
+
+Se pone de manifiesto que la primer componente explica el 62,3% de la varianza, mientras que la segunda el 13,7% (76,1% acumulada). A partir de allí cada componente adicional explica una proporción menor de la varianza. La tercera componente explica el 7,5% (83,6% acumulada), mientras que la cuarta un 4,4% (88% acumulada).
+
+## 3.2 Interpreta la primera y la segunda componente principal a partir de los vectores de cargas.
+
+Interpretación de la primera componente:
+
+```{r}
+sort(ACP$rotation[,1], decreasing = TRUE)
+```
+Se observa que las variables *CHI* (coeficiente de desigualdad humana), *IN_LE* (desigualdad en la esperanza de vida), y *GII* (índice de desigualdad de género) son los principales vectores  de carga positivos de la componente 1, mientras que *LEB* (esperanza de vida al nacer), *MYEDU* (promedio de años de escolaridad), y *P2EDU_F* (Población femenina con al menos algunos estudios secundarios) son los principales vectores de carga negativos.
+
+De este modo, cuanto *CHI*, *IN-LE*, O *GII* se incrementan, también lo hace la primera componente, mientras que cuando *LEB*, *MYEDU*, O *P2EDU_F* incrementan, la primera componente disminuye su valor. 
+
+Interpretación de la segunda componente:
+
+```{r}
+sort(ACP$rotation[,2], decreasing = TRUE)
+```
+Se observa que las variables *GINI* (coeficiente de Gini), *INC_10_RICH* (cuota de ingreso del 10 por ciento más rico), y *INC_1_RICH* (cuota de ingreso del 1 por ciento más rico) son los principales vectores  de carga positivos de la componente 2, mientras que *INC_40_POOR* (cuota de ingreso del 40 por ciento más pobre), *IN_EDU* (desigualdad en la educación), y *MMR* (ratio de mortalidad materna) son los principales vectores de carga negativos.
+
+## 3.3 Interpreta el biplot de la primera y segunda componente principal. ¿Qué puedes decir de los scores? Recuerda que las primeras observaciones tiene el IDH elevado y las últimas lo tienen bajo.
+
+Biplot de la primera y la segunda componente:
+
+```{r}
+PCbiplot <- function(PC, x="PC1", y="PC2", colors=c('black', 'black', 'red', 'red')) {
+  data <- data.frame(obsnames=row.names(PC$x), PC$x)
+  plot <- ggplot(data, aes_string(x=x, y=y)) + geom_text(alpha=.4, size=3, aes(label=obsnames), color=colors[1])
+  datapc <- data.frame(varnames=rownames(PC$rotation), PC$rotation)
+  mult <- min(
+    (max(data[,y]) - min(data[,y])/(max(datapc[,y])-min(datapc[,y]))),
+    (max(data[,x]) - min(data[,x])/(max(datapc[,x])-min(datapc[,x])))
+  )
+  datapc <- transform(datapc,
+                      v1 = .7 * mult * (get(x)),
+                      v2 = .7 * mult * (get(y))
+  )
+  plot <- plot + coord_equal() + geom_text(data=datapc, aes(x=v1, y=v2, label=varnames), size = 5, vjust=1, color=colors[3])
+  plot <- plot + geom_segment(data=datapc, aes(x=0, y=0, xend=v1, yend=v2), arrow=arrow(length=unit(0.2,"cm")), alpha=0.75, color=colors[4])
+  plot
+}
+
+PCbiplot(ACP, colors=c("black", "black", "red", "yellow"))
+```
+Los scores agrupan a los países de acuerdo al grado de similitud que poseen en los valores obtenidos. De este modo, se puede observar por ejemplo que los países con un IDH alto se encuentran agrupados en los valores negativos de la primera componente, mientras que los países con menor IDH se encuentran en el cuadrante de valores positivos de la primera componente principal.
+
+## 3.4 ¿Con cuantas componentes te quedarías para representar de forma resumida toda la información contenida en los datos?
+
+Si utilizamos la regla del codo y en base a los gráficos presentados en el inciso 3.1, deberíamos quedarnos con dos componentes, con lo cual explicamos el 76,1% de la varianza.
+
+## 3.5 La ONU calcula el IDH dando el misma peso a los indicadores de salud (esperanza de vida al nacer), educación (años esperados de escolarización y la media de años de escolarización, para lo cual calcula la media aritmética de los índices simples calculados a partir de dichas dos variables) y nivel de vida (Renta Nacional Bruta per capita).3 La OCDE (2008), en su manual de elaboración de indicadores compuestos de sugiere, entre otras posibles metodologías de agregación de los índices simples, el uso de componentes principales. Calcula las componentes principales de las variables LEB, EYEDU, MYEDU y GNIpc.4 Estudia sus vectores de carga y comenta dichos resultados en función de cómo pondera el IDH los diferentes indicadores. ¿Con cuantas componentes principales te quedarías?
+
+Calculo de los componentes principales de las variables seleccionadas:
+```{r}
+variables_OCDE= select(IDH2, "LEB", "EYEDU", "MYEDU", "GNIpc")
+ACP_OCDE= prcomp(variables_OCDE, center=TRUE, scale=TRUE)
+summary(ACP_OCDE)
+
+```
+
+
+Interpretación de la primera componente:
+
+```{r}
+sort(ACP_OCDE$rotation[,1], decreasing = TRUE)
+```
+
+Se ve que para la primera componente la variable *MYEDU* (promedio de años de escolaridad) y *EYEDU* (años previstos de escolaridad) son los vectores de carga negativos más importantes. No se registran vectores de carga positivos. 
+
+Interpretación de la segunda componente:
+
+```{r}
+sort(ACP_OCDE$rotation[,2], decreasing = TRUE)
+```
+Se observa que *GNIpc* (renta nacional bruta (RNB) per cápita) es el vector de carga negativo más influyente, mientras que *EYEDU* (años previstos de escolaridad) es el vector de carga positivo más relevante.
+
+Análisis por método del codo para definir la cantidad de componentes principales a elegir:
+
+```{r}
+ACP_OCDE.var=ACP_OCDE$sdev^2
+pve_OCDE=ACP_OCDE.var/sum(ACP_OCDE.var)
+
+y= plot(pve_OCDE, xlab="Componentes", ylab="Prop. Var. Explicada", ylim=c(0,1),xlim=c(1,4), xaxt='n',type='b')+
+  axis(side = 1, at=1:4)
+
+z= plot(cumsum(pve_OCDE), xlab="Componentes", ylab="Prop. Var. Explicada Acumulada", ylim=c(0.6,1),xaxt='n', type='b') +
+  axis(side=1, at=1:4)
+```
+
+Se observa que la primera componente principal explica el 88% de la varianza, mientras que añadiendo la segunda el 4,5% (92,8% acumulada), y una tercera el 3,8% (96,6% acumulada). 
+Siguiendo la regla del codo corresponde elegir dos componentes.
